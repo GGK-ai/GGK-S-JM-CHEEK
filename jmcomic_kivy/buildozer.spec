@@ -28,19 +28,19 @@ requirements = python3,kivy,requests
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 # Android API level
-android.api = 31
+android.api = 34
 
 # Android NDK version
-android.ndk = 23b
+android.ndk = 27b
 
 # Android SDK version
-android.sdk = 31
+android.sdk = 34
 
 # 最低安卓版本
 android.minapi = 21
 
 # 目标安卓版本
-android.targetapi = 31
+android.targetapi = 34
 
 # 是否启用AndroidX
 android.enable_androidx = True
