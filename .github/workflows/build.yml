@@ -5,17 +5,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install buildozer
-        run: |
-          pip install buildozer cython
-      - name: Build APK
+      - name: Build APK with python-for-android
         run: |
           cd jmcomic_kivy
-          rm -rf ~/.buildozer
-          buildozer android debug 2>&1
+          docker run --rm -v $PWD:/app -w /app kivy/python-for-android:latest bash -c "
+            pip install Cython
+            p4a apk \
+              --requirements python3,kivy,requests \
+              --private . \
+              --package org.jmcomic.app \
+              --name 'JMComic禁漫宝' \
+              --version 1.0 \
+              --bootstrap sdl2 \
+              --arch arm64-v8a \
+              --android-api 34 \
+              --ndk-dir /opt/android/ndk \
+              --sdk-dir /opt/android/sdk \
+              --permission INTERNET \
+              --permission ACCESS_NETWORK_STATE \
+              --permission WRITE_EXTERNAL_STORAGE \
+              --permission READ_EXTERNAL_STORAGE
+          "
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
