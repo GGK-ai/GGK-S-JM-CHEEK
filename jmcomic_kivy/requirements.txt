@@ -1,0 +1,6 @@
+kivy>=2.1.0
+jmcomic>=2.7.0
+curl_cffi>=0.5.10
+pycryptodome>=3.18.0
+pyyaml>=6.0
+Pillow>=9.0.0
