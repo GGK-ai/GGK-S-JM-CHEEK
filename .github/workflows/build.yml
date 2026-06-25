@@ -8,12 +8,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install
+      - name: Install deps
         run: |
           sudo apt update
           sudo apt install -y git zip unzip openjdk-17-jdk python3-pip
-          pip install buildozer
-      - name: Build
+          pip install buildozer cython
+      - name: Setup Android SDK
+        run: |
+          mkdir -p ~/android-sdk
+          cd ~/android-sdk
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-*.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          export ANDROID_HOME=~/android-sdk
+          yes | ~/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-31" "build-tools;31.0.0" "platform-tools" > /dev/null 2>&1 || true
+          echo "Android SDK setup done"
+      - name: Build APK
+        env:
+          ANDROID_HOME: ~/android-sdk
         run: |
           cd jmcomic_kivy
           buildozer android debug
