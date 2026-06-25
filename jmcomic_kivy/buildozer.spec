@@ -21,8 +21,8 @@ version = 1.0.0
 # 版本号
 version.code = 1
 
-# requirements
-requirements = python3,kivy,jmcomic,curl_cffi,pycryptodome,pyyaml, Pillow
+# requirements - 轻量版！不用curl_cffi！
+requirements = python3,kivy,requests
 
 # 权限
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
@@ -51,9 +51,6 @@ android.use_default_activity = True
 # 支持的架构
 android.archs = arm64-v8a
 
-# 图标文件（可选的，可以放一个png）
-# android.icon = icon.png
-
 # 屏幕方向
 orientation = portrait
 
@@ -63,17 +60,5 @@ fullscreen = 0
 # 日志级别
 log_level = 2
 
-# 是否启用广告
-android.enable_ads = False
-
-# 是否启用Google Play服务
-android.enable_google_play = False
-
 # Python版本
 python3.version = 3.11
-
-# 一些额外的jar/aar文件
-# android.add_aars =
-
-# 确保curl_cffi有底层依赖
-android.extra_libs_dirs = 

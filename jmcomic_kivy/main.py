@@ -1,6 +1,6 @@
-# ===== JMComic 禁漫宝 - Kivy安卓版 =====
+# ===== JMComic 禁漫宝 - Kivy安卓轻量版 =====
 # 邪王真眼之力加持！✨
-# 用Buildozer打包成APK即可在安卓上运行
+# 使用requests代替curl_cffi，打包更轻松
 # =========================================
 
 from kivy.app import App
@@ -15,28 +15,35 @@ from kivy.clock import Clock
 from kivy.utils import platform
 from kivy.metrics import dp
 import threading
+import json
 import os
+import re
 
-# 安卓存储权限
+# 安卓存储路径
 if platform == 'android':
-    from android.permissions import request_permissions, Permission
-    request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
-    from android.storage import primary_external_storage_path
-    DOWNLOAD_PATH = os.path.join(primary_external_storage_path(), 'Download', 'JMComic')
+    try:
+        from android.permissions import request_permissions, Permission
+        request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+        from android.storage import primary_external_storage_path
+        DOWNLOAD_PATH = os.path.join(primary_external_storage_path(), 'Download', 'JMComic')
+    except:
+        DOWNLOAD_PATH = '/storage/emulated/0/Download/JMComic'
 else:
     DOWNLOAD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'JM下载')
 
-import jmcomic
-from jmcomic import JmOption
+import requests
 
 
 class JMComicLayout(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation='vertical', spacing=dp(5), padding=dp(10), **kwargs)
-        self.client = None
-        self.option = None
         self.current_album = None
         self.current_episodes = []
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36',
+            'Referer': 'https://18comic.vip/'
+        })
 
         # 标题
         title = Label(
@@ -132,17 +139,6 @@ class JMComicLayout(BoxLayout):
         )
         self.add_widget(self.status_label)
 
-        Clock.schedule_once(self.init_client, 1)
-
-    def init_client(self, dt=None):
-        try:
-            self.status_label.text = '正在初始化邪王真眼之力...'
-            self.option = JmOption.default()
-            self.client = self.option.new_jm_client()
-            self.status_label.text = '连接成功！输入车号开始探索~'
-        except Exception as e:
-            self.status_label.text = '初始化失败，请检查网络'
-
     def search_album(self, instance=None):
         album_id = self.id_input.text.strip()
         if not album_id or not album_id.isdigit():
@@ -161,25 +157,77 @@ class JMComicLayout(BoxLayout):
 
     def _do_search(self, album_id):
         try:
-            album = self.client.get_album_detail(album_id)
-            self.current_album = album
-            self.current_episodes = album.episode_list
+            # 获取专辑信息
+            url = f'https://18comic.vip/api/album/{album_id}'
+            resp = self.session.get(url, timeout=30)
 
-            info = f'[b]标题：[/b]{album.title}\n'
-            info += f'[b]作者：[/b]{album.author}\n'
-            info += f'[b]章节：[/b]{len(self.current_episodes)}  总页数：{album.page_count}'
+            if resp.status_code != 200:
+                Clock.schedule_once(lambda dt: self._update_error(f'HTTP {resp.status_code}'), 0)
+                return
 
-            Clock.schedule_once(lambda dt: self._update_ui(info), 0)
+            data = resp.json()
+
+            if 'album' not in data:
+                # 尝试从其他路径解析
+                Clock.schedule_once(lambda dt: self._update_error('无法解析响应数据'), 0)
+                return
+
+            album_data = data['album']
+            title = album_data.get('title', '未知标题')
+            author = album_data.get('author', {}).get('name', '未知') if isinstance(album_data.get('author'), dict) else album_data.get('author', '未知')
+            tags_list = album_data.get('tags', [])
+            tags_str = ', '.join([t.get('name', '') for t in tags_list[:5] if isinstance(t, dict)]) if tags_list else '无标签'
+
+            # 获取章节列表
+            episodes = album_data.get('episodes', [])
+            if not episodes:
+                episodes = album_data.get('photos', [])
+
+            self.current_episodes = []
+            ep_list_display = []
+
+            for ep in episodes:
+                if isinstance(ep, dict):
+                    ep_id = ep.get('id', '')
+                    ep_idx = ep.get('index', ep.get('order', 0))
+                    ep_title = ep.get('title', f'第{ep_idx}章')
+                elif isinstance(ep, (list, tuple)):
+                    ep_id = ep[0]
+                    ep_idx = ep[1]
+                    ep_title = ep[2] if len(ep) > 2 else f'第{ep_idx}章'
+                else:
+                    continue
+
+                self.current_episodes.append((ep_id, ep_idx, ep_title))
+
+            if not self.current_episodes:
+                # 尝试从photo列表获取
+                photos = album_data.get('photos', [])
+                for p in photos:
+                    if isinstance(p, dict):
+                        pid = p.get('id', '')
+                        pidx = p.get('index', 0)
+                        ptitle = p.get('title', f'第{pidx}章')
+                        self.current_episodes.append((pid, pidx, ptitle))
+
+            info = f'[b]标题：[/b]{title}\n'
+            info += f'[b]作者：[/b]{author}\n'
+            info += f'[b]章节：[/b]{len(self.current_episodes)}'
+
+            Clock.schedule_once(lambda dt: self._update_ui(info, title, album_id), 0)
 
         except Exception as e:
             err = str(e)[:100]
-            Clock.schedule_once(lambda dt: self._update_ui_error(err), 0)
+            Clock.schedule_once(lambda dt: self._update_error(err), 0)
 
-    def _update_ui(self, info):
+    def _update_ui(self, info, title, album_id):
         self.info_label.text = info
+        self.current_title = title
+        self.current_id = album_id
+
         self.ep_list.clear_widgets()
-        for pid, pidx, ptitle in self.current_episodes:
-            btn_text = f'[{pidx}] {ptitle}'
+        for ep_id, ep_idx, ep_title in self.current_episodes:
+            btn_text = f'[{ep_idx}] {ep_title}'
             if len(btn_text) > 30:
                 btn_text = btn_text[:28] + '...'
             ep_btn = Button(
@@ -189,7 +237,7 @@ class JMComicLayout(BoxLayout):
                 background_color=(0.25, 0.25, 0.25, 1),
                 color=(1, 1, 1, 1),
                 font_size=dp(12),
-                on_press=lambda btn, a=pid, b=pidx: self.download_single_episode(a, b)
+                on_press=lambda btn, eid=ep_id, eidx=ep_idx: self.download_single_episode(eid, eidx)
             )
             self.ep_list.add_widget(ep_btn)
 
@@ -199,90 +247,146 @@ class JMComicLayout(BoxLayout):
         self.search_btn.text = '查询'
         self.status_label.text = f'找到 {len(self.current_episodes)} 个章节'
 
-    def _update_ui_error(self, err):
+    def _update_error(self, err):
         self.info_label.text = f'查询失败：{err}'
         self.search_btn.disabled = False
         self.search_btn.text = '查询'
         self.status_label.text = '查询失败，检查车号或网络'
 
     def preview_album(self, instance=None):
-        if not self.current_album:
+        if not self.current_id:
             return
         import webbrowser
-        url = f'https://18comic.vip/photo/{self.current_album.id}'
+        url = f'https://18comic.vip/photo/{self.current_id}'
         webbrowser.open(url)
         self.status_label.text = '已打开网页版'
 
     def download_album(self, instance=None):
-        if not self.current_album:
+        if not self.current_id:
             return
-        album_id = self.current_album.id
-        title = self.current_album.title
-        save_dir = os.path.join(DOWNLOAD_PATH, f'{album_id}_{self._sanitize(title)}')
+
+        save_dir = os.path.join(DOWNLOAD_PATH, f'{self.current_id}_{self._sanitize(self.current_title)}')
 
         try:
             os.makedirs(save_dir, exist_ok=True)
         except:
             pass
 
-        self.show_popup('下载', f'开始下载《{title}》')
-
+        self.show_popup('下载', f'开始下载《{self.current_title}》（共{len(self.current_episodes)}章）')
         self.download_all_btn.disabled = True
         self.download_all_btn.text = '下载中...'
         self.status_label.text = '正在下载...'
 
-        threading.Thread(target=self._do_download_album, args=(album_id, save_dir), daemon=True).start()
+        threading.Thread(target=self._do_download_all, args=(save_dir,), daemon=True).start()
 
-    def _do_download_album(self, album_id, save_dir):
+    def _do_download_all(self, save_dir):
         try:
-            opt_dict = {
-                'dir_rule': {'rule': 'Bd_Aid_Atitle', 'base_dir': save_dir},
-                'download': {'cache': True, 'image': {'decode': True, 'suffix': None}, 'threading': {'image': 30}},
-                'client': {'impl': 'api', 'retry_times': 5,
-                           'postman': {'type': 'curl_cffi', 'meta_data': {'impersonate': 'chrome', 'proxies': None}}}
-            }
-            opt = JmOption.construct(opt_dict)
-            album, dler = jmcomic.download_album(album_id, opt)
+            for i, (ep_id, ep_idx, ep_title) in enumerate(self.current_episodes):
+                Clock.schedule_once(lambda dt, idx=ep_idx: self.status_label.config(text=f'正在下载第{idx}章...'), 0)
+                ep_save_dir = os.path.join(save_dir, f'{int(ep_idx):03d}_{self._sanitize(ep_title)}')
+                self._download_episode_images(ep_id, ep_save_dir)
+
             Clock.schedule_once(lambda dt: self._download_done(), 0)
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._download_error(str(e)[:100]), 0)
+            Clock.schedule_once(lambda dt, err=str(e)[:100]: self._download_error(err), 0)
 
-    def download_single_episode(self, photo_id, index, instance=None):
-        if not self.current_album:
-            return
-        album = self.current_album
-        title = f'第{index}章'
-        save_dir = os.path.join(DOWNLOAD_PATH, f'{album.id}_{self._sanitize(album.title)}',
-                                f'{int(index):03d}_{title}')
+    def download_single_episode(self, ep_id, ep_idx):
+        ep_title = f'第{ep_idx}章'
+        save_dir = os.path.join(DOWNLOAD_PATH, f'{self.current_id}_{self._sanitize(self.current_title)}',
+                                f'{int(ep_idx):03d}_{ep_title}')
 
         try:
             os.makedirs(save_dir, exist_ok=True)
         except:
             pass
 
-        self.show_popup('下载章节', f'开始下载{title}')
-        self.status_label.text = f'正在下载{title}...'
+        self.show_popup('下载章节', f'开始下载{ep_title}')
+        self.status_label.text = f'正在下载{ep_title}...'
 
-        threading.Thread(target=self._do_download_ep, args=(photo_id, save_dir), daemon=True).start()
+        threading.Thread(target=self._do_download_single, args=(ep_id, save_dir), daemon=True).start()
 
-    def _do_download_ep(self, photo_id, save_dir):
+    def _do_download_single(self, ep_id, save_dir):
         try:
-            opt_dict = {
-                'dir_rule': {'rule': 'Bd_Pname', 'base_dir': save_dir},
-                'download': {'cache': True, 'image': {'decode': True, 'suffix': None}, 'threading': {'image': 30}},
-                'client': {'impl': 'api', 'retry_times': 5,
-                           'postman': {'type': 'curl_cffi', 'meta_data': {'impersonate': 'chrome', 'proxies': None}}}
-            }
-            opt = JmOption.construct(opt_dict)
-            photo_obj, dler = jmcomic.download_photo(photo_id, opt)
+            self._download_episode_images(ep_id, save_dir)
             Clock.schedule_once(lambda dt: self._download_done(), 0)
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._download_error(str(e)[:100]), 0)
+            Clock.schedule_once(lambda dt, err=str(e)[:100]: self._download_error(err), 0)
+
+    def _download_episode_images(self, ep_id, save_dir):
+        """下载一个章节的所有图片"""
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 获取章节图片列表
+            url = f'https://18comic.vip/api/photo/{ep_id}'
+            resp = self.session.get(url, timeout=30)
+
+            if resp.status_code != 200:
+                return
+
+            data = resp.json()
+            photo_data = data.get('photo', data)
+
+            # 获取图片URL列表
+            img_urls = []
+            if 'images' in photo_data:
+                img_urls = photo_data['images']
+            elif 'img_list' in photo_data:
+                img_urls = photo_data['img_list']
+
+            if not img_urls:
+                # 尝试从其他字段获取
+                for key in ['imgs', 'pics', 'files', 'urls']:
+                    if key in photo_data:
+                        img_urls = photo_data[key]
+                        break
+
+            if not img_urls and isinstance(photo_data, list):
+                img_urls = photo_data
+
+            if not img_urls:
+                Clock.schedule_once(lambda dt: self.log_text_append('没有找到图片链接'), 0)
+                return
+
+            # 下载每张图片
+            for idx, img_url in enumerate(img_urls):
+                if isinstance(img_url, dict):
+                    img_url = img_url.get('url', img_url.get('src', ''))
+
+                if not img_url or not isinstance(img_url, str):
+                    continue
+
+                # 确保URL完整
+                if img_url.startswith('//'):
+                    img_url = 'https:' + img_url
+                elif img_url.startswith('/'):
+                    img_url = 'https://18comic.vip' + img_url
+
+                try:
+                    img_resp = self.session.get(img_url, timeout=60)
+                    if img_resp.status_code == 200:
+                        ext = '.jpg'
+                        if 'image/png' in img_resp.headers.get('Content-Type', ''):
+                            ext = '.png'
+                        elif 'image/webp' in img_resp.headers.get('Content-Type', ''):
+                            ext = '.webp'
+
+                        fname = os.path.join(save_dir, f'{idx+1:04d}{ext}')
+                        with open(fname, 'wb') as f:
+                            f.write(img_resp.content)
+                except:
+                    continue
+
+        except Exception as e:
+            Clock.schedule_once(lambda dt, err=str(e)[:50]: self.log_text_append(f'下载出错：{err}'), 0)
+
+    def log_text_append(self, text):
+        self.status_label.text = text
 
     def _download_done(self):
         self.download_all_btn.disabled = False
         self.download_all_btn.text = '下载全部'
-        self.status_label.text = '下载完成！保存在手机 Download/JMComic 文件夹'
+        self.status_label.text = '下载完成！保存在 Download/JMComic 文件夹'
 
     def _download_error(self, err):
         self.download_all_btn.disabled = False
@@ -290,6 +394,8 @@ class JMComicLayout(BoxLayout):
         self.status_label.text = f'下载失败：{err}'
 
     def _sanitize(self, name):
+        if not name:
+            return 'unnamed'
         invalid = r'<>:"/\|?*'
         for c in invalid:
             name = name.replace(c, '_')
@@ -312,5 +418,4 @@ class JMComicApp(App):
 
 
 if __name__ == '__main__':
-    jmcomic.disable_jm_log()
     JMComicApp().run()
