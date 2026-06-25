@@ -2,13 +2,22 @@ name: Build APK
 on: [push, workflow_dispatch]
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
+      - uses: actions/setup-python@v5
         with:
-          workdir: jmcomic_kivy
+          python-version: '3.8'
+      - name: Install deps
+        run: |
+          sudo apt update
+          sudo apt install -y git zip unzip python3-pip python3-setuptools
+          pip install --user buildozer cython
+      - name: Build APK
+        run: |
+          export PATH=$HOME/.local/bin:$PATH
+          cd jmcomic_kivy
+          buildozer android debug
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
