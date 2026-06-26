@@ -3,19 +3,31 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: kivy/buildozer:latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Buildozer
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y wget automake autotools-dev libtool cmake ccache
+          pip install --upgrade pip
+          pip install buildozer cython
+
+      - name: Cache
         uses: actions/cache@v4
         with:
-          path: /home/user/.buildozer
-          key: ${{ runner.os }}-buildozer-v3
+          path: |
+            ~/.buildozer
+            ~/.ccache
+          key: buildozer-cache-${{ runner.os }}
 
-      - name: Build APK
+      - name: Build
         run: |
           cd jmcomic_kivy
           buildozer android debug 2>&1
